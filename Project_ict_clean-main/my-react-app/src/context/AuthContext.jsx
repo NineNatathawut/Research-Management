@@ -56,6 +56,22 @@ export function AuthProvider({ children }) {
           setAuthLoading(false);
         });
     } else {
+      // Dev mode: auto-create mock user for testing without Microsoft login
+      if (process.env.NODE_ENV === 'development') {
+        const mockUser = {
+          id: 1,
+          email: 'dev@up.ac.th',
+          full_name: 'Developer Test',
+          name_en: 'Dev User',
+          name_th: 'นักพัฒนา ทดสอบ',
+          department: 'Information Technology',
+          position: 'อาจารย์',
+          scholar_id: null,
+          role: 'admin'
+        };
+        setUser(mockUser);
+        localStorage.setItem('auth_token', 'dev-mock-token');
+      }
       setAuthLoading(false);
     }
   }, []);

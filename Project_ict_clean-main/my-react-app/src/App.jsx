@@ -26,6 +26,7 @@ import Header from "./components/Header";
 import Sidebar from "./components/Sidebar";
 import ScholarDashboard from "./components/ScholarDashboard";
 import PdfUploadModal from "./components/PdfUploadModal";
+import api from "./api/client";
 import "./App.css";
 
 const API_URL = "http://localhost:5000/api";
@@ -163,12 +164,9 @@ function AcademicWorkloadMain() {
   // 1. ดึงข้อมูลรายการที่เคยบันทึกไว้เมื่อโหลดและล็อกอินแล้ว
   useEffect(() => {
     if (!user) return;
-    fetch(`${API_URL}/entries`, {
-      headers: token ? { Authorization: `Bearer ${token}` } : {}
-    })
-      .then(res => res.json())
-      .then(data => { if (data.success) setEntries(data.data); })
-      .catch(err => console.error("Error fetching entries:", err));
+    api.get('/entries')
+      .then(res => { if (res.data.success) setEntries(res.data.data); })
+      .catch(err => console.error("Entries DB Error:", err.response?.data || err.message));
   }, [user, token]);
 
   // 2. ขอให้ Backend คำนวณผลลัพธ์แบบ Live Preview เมื่อมีการเปลี่ยนค่าในฟอร์ม

@@ -239,7 +239,7 @@ export default function ScholarDashboard({ onImportToForm }) {
 
   const fetchUsers = useCallback(async () => {
     try {
-      const res = await api.get('/api/users');
+      const res = await api.get('/users');
       setUsers(res.data);
     } catch (error) {
       console.error('Fetch users failed:', error);
@@ -283,7 +283,7 @@ export default function ScholarDashboard({ onImportToForm }) {
     setIsSavingScholarId(true);
     setScholarFeedback('');
     try {
-      const res = await api.put(`/api/users/${selectedProfId}/scholar-id`, {
+      const res = await api.put(`/users/${selectedProfId}/scholar-id`, {
         scholarId: scholarIdInput
       });
       if (currentUser) {
@@ -306,7 +306,7 @@ export default function ScholarDashboard({ onImportToForm }) {
     setIsSyncing(true);
     setScholarFeedback('');
     try {
-      const res = await api.post(`/api/sync-scholar/${selectedProfId}`);
+      const res = await api.post(`/sync-scholar/${selectedProfId}`);
       const data = res.data.data;
       setScholarFeedback(`✓ ซิงก์สำเร็จ! (เพิ่มใหม่ ${data.created.length} รายการ, เชื่อมโยง Co-author ${data.linked.length} รายการ)`);
       setScholarFeedbackType('success');
@@ -324,7 +324,7 @@ export default function ScholarDashboard({ onImportToForm }) {
     if (!selectedProfId) return;
     setIsLoadingPapers(true);
     try {
-      const res = await api.get(`/api/users/${selectedProfId}/papers`);
+      const res = await api.get(`/users/${selectedProfId}/papers`);
       setPapers(res.data);
     } catch (error) {
       console.error('Fetch papers failed:', error);
@@ -339,7 +339,7 @@ export default function ScholarDashboard({ onImportToForm }) {
 
   const handleConfirmPaper = async (paper, newContribution, isFirstAuthor, isCorresponding) => {
     try {
-      await api.put(`/api/papers/${paper.paper_id}/confirm`, {
+      await api.put(`(papers/${paper.paper_id}/confirm`, {
         userId: selectedProfId,
         contributionPercent: newContribution,
         isFirstAuthor,

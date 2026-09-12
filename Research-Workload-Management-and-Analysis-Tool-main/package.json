@@ -1,6 +1,0 @@
-{
-  "dependencies": {
-    "pg": "^8.23.0",
-    "puppeteer": "^25.10.0"
-  }
-}

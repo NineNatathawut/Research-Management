@@ -104,7 +104,7 @@ export default function PdfUploadModal({ isOpen, onClose, onExtractComplete }) {
     try {
       // Step 1: Upload & GROBID
       setProgress(30);
-      const res = await api.post('/api/extract', formData, {
+      const res = await api.post('/extract', formData, {
         timeout: 120000,
         onUploadProgress: (progressEvent) => {
           const percentCompleted = Math.round((progressEvent.loaded * 30) / progressEvent.total);

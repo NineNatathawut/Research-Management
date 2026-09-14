@@ -426,8 +426,8 @@ async function syncUserScholarData(userId) {
         // 2. ตรวจสอบว่าผลงานมีอยู่ในตาราง papers แล้วหรือไม่
         const existing = await pool.query(
             `SELECT id, status, cited_by FROM papers 
-             WHERE (scholar_url IS NOT NULL AND scholar_url != '' AND scholar_url = $1)
-                OR (LOWER(TRIM(title)) = LOWER(TRIM($2)) AND publish_year = $3)
+             WHERE (scholar_url IS NOT NULL AND scholar_url != '' AND scholar_url = ?)
+                OR (LOWER(TRIM(title)) = LOWER(TRIM(?)) AND publish_year = ?)
              LIMIT 1`,
             [paper.scholar_url, paper.title, paper.publish_year]
         );
@@ -438,17 +438,15 @@ async function syncUserScholarData(userId) {
             // 3.1 กรณีผลงานยังไม่มีในระบบ -> สร้างใหม่ (สถานะเริ่มต้น DRAFT_AUTO ตามข้อกำหนด)
             const inserted = await pool.query(
                 `INSERT INTO papers (title, publish_year, authors_raw, cited_by, scholar_url, source, status)
-                 VALUES ($1, $2, $3, $4, $5, 'scholar', 'DRAFT_AUTO') 
-                 RETURNING id, title`,
+                 VALUES (?, ?, ?, ?, ?, 'scholar', 'DRAFT_AUTO')`,
                 [paper.title, paper.publish_year, paper.authors_raw, paper.cited_by, paper.scholar_url]
             );
-            paperId = inserted[0][0].id;
+            paperId = inserted[0].insertId;
 
             // ผูกผู้ใช้เข้ากับผลงาน (สถานะ PENDING)
             await pool.query(
-                `INSERT INTO paper_authors (paper_id, user_id, status)
-                 VALUES ($1, $2, 'PENDING')
-                 ON CONFLICT (paper_id, user_id) DO NOTHING`,
+                `INSERT IGNORE INTO paper_authors (paper_id, user_id, status)
+                 VALUES (?, ?, 'PENDING')`,
                 [paperId, user.id]
             );
 
@@ -460,23 +458,22 @@ async function syncUserScholarData(userId) {
 
             // ตรวจสอบว่าผู้ใช้คนนี้เคยถูกผูกกับผลงานนี้หรือยัง
             const authorCheck = await pool.query(
-                `SELECT id, status FROM paper_authors WHERE paper_id = $1 AND user_id = $2`,
+                `SELECT id, status FROM paper_authors WHERE paper_id = ? AND user_id = ?`,
                 [paperId, user.id]
             );
 
             if (authorCheck[0].length === 0) {
                 // ยังไม่เคยผูก -> ผูกผู้ใช้คนนี้เข้ากับผลงาน
                 await pool.query(
-                    `INSERT INTO paper_authors (paper_id, user_id, status)
-                     VALUES ($1, $2, 'PENDING')
-                     ON CONFLICT (paper_id, user_id) DO NOTHING`,
+                    `INSERT IGNORE INTO paper_authors (paper_id, user_id, status)
+                     VALUES (?, ?, 'PENDING')`,
                     [paperId, user.id]
                 );
 
                 // ปรับสถานะบทความเป็น PENDING_CO_AUTHOR หากยังเป็น DRAFT_AUTO
                 if (existingPaper.status === 'DRAFT_AUTO') {
                     await pool.query(
-                        `UPDATE papers SET status = 'PENDING_CO_AUTHOR', updated_at = CURRENT_TIMESTAMP WHERE id = $1`,
+                        `UPDATE papers SET status = 'PENDING_CO_AUTHOR', updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
                         [paperId]
                     );
                 }
@@ -487,7 +484,7 @@ async function syncUserScholarData(userId) {
                 // เคยผูกไว้แล้ว -> อัปเดต cited_by หากจำนวนอ้างอิงใหม่สูงขึ้น
                 if (paper.cited_by > (existingPaper.cited_by || 0)) {
                     await pool.query(
-                        `UPDATE papers SET cited_by = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2`,
+                        `UPDATE papers SET cited_by = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
                         [paper.cited_by, paperId]
                     );
                 }
@@ -507,22 +504,21 @@ async function syncUserScholarData(userId) {
                     const isOtherBlacklisted = await isPaperBlacklisted(otherUser.id, paper.title);
                     if (!isOtherBlacklisted) {
                         const checkOther = await pool.query(
-                            `SELECT id FROM paper_authors WHERE paper_id = $1 AND user_id = $2`,
+                            `SELECT id FROM paper_authors WHERE paper_id = ? AND user_id = ?`,
                             [paperId, otherUser.id]
                         );
 
                         if (checkOther[0].length === 0) {
                             await pool.query(
-                                `INSERT INTO paper_authors (paper_id, user_id, status)
-                                 VALUES ($1, $2, 'PENDING')
-                                 ON CONFLICT (paper_id, user_id) DO NOTHING`,
+                                `INSERT IGNORE INTO paper_authors (paper_id, user_id, status)
+                                 VALUES (?, ?, 'PENDING')`,
                                 [paperId, otherUser.id]
                             );
 
                             await pool.query(
                                 `UPDATE papers 
                                  SET status = 'PENDING_CO_AUTHOR', updated_at = CURRENT_TIMESTAMP 
-                                 WHERE id = $1 AND status = 'DRAFT_AUTO'`,
+                                 WHERE id = ? AND status = 'DRAFT_AUTO'`,
                                 [paperId]
                             );
                             console.log(`[Scholar Sync] ตรวจพบผู้เขียนร่วมอัตโนมัติ: User ${otherUser.id} (${otherUser.name_en}) -> Paper ${paperId}`);
@@ -554,7 +550,7 @@ async function syncAllUsersScholarData() {
 
     for (const user of users) {
         try {
-            const userResult = await syncUserScholarData(user);
+            const userResult = await syncUserScholarData(user.id);
             aggregate.createdCount += userResult.created.length;
             aggregate.newPapers.push(...userResult.created);
 

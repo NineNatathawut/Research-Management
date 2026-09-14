@@ -3,9 +3,6 @@ import axios from 'axios';
 const api = axios.create({
   baseURL: 'http://localhost:5000/api',
   timeout: 120000, // 120 seconds for PDF extraction (GROBID + Gemini)
-  headers: {
-    'Content-Type': 'application/json',
-  },
 });
 
 // Request interceptor to add auth token

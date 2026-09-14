@@ -2278,14 +2278,14 @@
   color: #64748b;
 }
 
-.preview-field value {
+.preview-field span {
   font-size: 14px;
   color: #1e1b4b;
   font-weight: 500;
   word-break: break-word;
 }
 
-.preview-field value.abstract-text {
+.preview-field span.abstract-text {
   font-size: 13px;
   line-height: 1.6;
   color: #475569;

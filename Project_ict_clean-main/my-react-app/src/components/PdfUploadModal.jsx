@@ -259,45 +259,45 @@ export default function PdfUploadModal({ isOpen, onClose, onExtractComplete }) {
               <div className="metadata-preview">
                 <div className="preview-field">
                   <label>ชื่อบทความ</label>
-                  <value>{metadata.title || metadata.article_title || '-'}</value>
+                  <span>{metadata.title || metadata.article_title || '-'}</span>
                 </div>
                 <div className="preview-field">
                   <label>ผู้แต่ง</label>
-                  <value>
+                  <span>
                     {(metadata.authors || []).map((a, i) => (
                       <span key={i} className="author-tag">
                         {a.name} {a.is_first_author && <span className="role-tag first">First</span>}
                         {a.is_corresponding && <span className="role-tag corresponding">Corr.</span>}
                       </span>
                     ))}
-                  </value>
+                  </span>
                 </div>
                 <div className="preview-field">
                   <label>วารสาร</label>
-                  <value>{metadata.journal || '-'}</value>
+                  <span>{metadata.journal || '-'}</span>
                 </div>
                 <div className="preview-field">
                   <label>ปีที่ตีพิมพ์</label>
-                  <value>{metadata.publish_date || metadata.publication_date || '-'}</value>
+                  <span>{metadata.publish_date || metadata.publication_date || '-'}</span>
                 </div>
                 <div className="preview-field">
                   <label>DOI</label>
-                  <value>{metadata.doi || '-'}</value>
+                  <span>{metadata.doi || '-'}</span>
                 </div>
                 <div className="preview-field">
                   <label>Volume / Issue</label>
-                  <value>{metadata.volume || '-'} / {metadata.issue || '-'}</value>
+                  <span>{metadata.volume || '-'} / {metadata.issue || '-'}</span>
                 </div>
                 {metadata.abstract && (
                   <div className="preview-field full-width">
                     <label>บทคัดย่อ</label>
-                    <value className="abstract-text">{metadata.abstract.substring(0, 200)}...</value>
+                    <span className="abstract-text">{metadata.abstract.substring(0, 200)}...</span>
                   </div>
                 )}
                 {metadata.keywords && (
                   <div className="preview-field full-width">
                     <label>คำสำคัญ</label>
-                    <value>{metadata.keywords}</value>
+                    <span>{metadata.keywords}</span>
                   </div>
                 )}
               </div>

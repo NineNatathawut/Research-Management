@@ -1,6 +1,20 @@
 import React from 'react';
 import { Calendar, Users, Award, BookOpen, ExternalLink } from 'lucide-react';
 
+const badgeStyle = (bg, color, border) => ({
+  display: 'inline-flex',
+  alignItems: 'center',
+  padding: '2px 8px',
+  borderRadius: '4px',
+  fontSize: '11px',
+  fontWeight: 600,
+  backgroundColor: bg,
+  color: color,
+  border: `1px solid ${border}`,
+  marginRight: '6px',
+  lineHeight: '1.4'
+});
+
 export default function PaperCard({ paper, currentUser, onConfirm, onReject, onImport }) {
   const isConfirmed = paper.author_status === 'CONFIRMED';
 
@@ -42,6 +56,20 @@ export default function PaperCard({ paper, currentUser, onConfirm, onReject, onI
           >
             {paper.title}
           </h3>
+
+          {/* Source Badge */}
+          <div style={{ display: 'flex', alignItems: 'center', marginBottom: '6px' }}>
+            {paper.source === 'scopus' && (
+              <span style={badgeStyle('#fff7ed', '#c55a11', '#fed7aa')}>
+                <span style={{ marginRight: '4px' }}>📖</span> Scopus
+              </span>
+            )}
+            {paper.source === 'scholar' && (
+              <span style={badgeStyle('#eff6ff', '#2563eb', '#bfdbfe')}>
+                <span style={{ marginRight: '4px' }}>🔍</span> Google Scholar
+              </span>
+            )}
+          </div>
 
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: '16px', fontSize: '13px', color: '#64748b', marginBottom: '8px' }}>
             <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>

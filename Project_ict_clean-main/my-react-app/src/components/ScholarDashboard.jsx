@@ -59,8 +59,12 @@ export default function ScholarDashboard({ onImportToForm }) {
   const [scholarIdInput, setScholarIdInput] = useState('');
   const [isSavingScholarId, setIsSavingScholarId] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
+  const [isSyncingScopus, setIsSyncingScopus] = useState(false);
   const [scholarFeedback, setScholarFeedback] = useState('');
   const [scholarFeedbackType, setScholarFeedbackType] = useState('success');
+  const [scopusMetrics, setScopusMetrics] = useState(null);
+  const [scopusFeedback, setScopusFeedback] = useState('');
+  const [scopusFeedbackType, setScopusFeedbackType] = useState('success');
   const [searchQuery, setSearchQuery] = useState('');
   const [filterStatus, setFilterStatus] = useState('ALL');
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(true);
@@ -130,12 +134,14 @@ export default function ScholarDashboard({ onImportToForm }) {
 
   const selectProfessor = (id) => {
     setSelectedProfId(id);
-    handleUserChange(id); // ส่ง ID ไปตรงๆ เพื่อให้ฟังก์ชันทำงานได้ทันที
+    setScopusMetrics(null);
+    handleUserChange(id);
   };
 
   const clearSelection = () => {
     setSelectedProfId(null);
     setScholarFeedback('');
+    setScopusMetrics(null);
   };
 
   const handleUserChange = (id) => {
@@ -144,11 +150,17 @@ export default function ScholarDashboard({ onImportToForm }) {
       setScholarIdInput(user.scholar_id || '');
     }
     setScholarFeedback('');
+    setScopusMetrics(null);
 
     // 1. สั่งดึงข้อมูลเดิมจาก Database มาแสดงบนหน้าเว็บ "ทันที"
     fetchUserPapers(id);
 
-    // 2. ถ้ามี Scholar ID ให้สั่งบอทไปดึงผลงานใหม่แบบ "เบื้องหลัง" (ไม่บล็อกหน้าจอ)
+    // 2. ดึง Scopus Metrics ถ้ามี scopus_id
+    if (user && user.scopus_id) {
+      fetchScopusMetrics(id);
+    }
+
+    // 3. ถ้ามี Scholar ID ให้สั่งบอทไปดึงผลงานใหม่แบบ "เบื้องหลัง" (ไม่บล็อกหน้าจอ)
     if (user && user.scholar_id) {
       triggerScholarSync(id);
     }
@@ -184,20 +196,65 @@ export default function ScholarDashboard({ onImportToForm }) {
     
     setIsSyncing(true);
     setScholarFeedback('🔄 กำลังดึงผลงานล่าสุดจาก Google Scholar แบบอัตโนมัติ...');
-    setScholarFeedbackType('success'); // ใช้สีเขียวเพื่อแสดงสถานะกำลังโหลด
+    setScholarFeedbackType('success');
     
     try {
       const res = await api.post(`/sync-scholar/${id}`);
       const data = res.data.data;
       setScholarFeedback(`✓ ซิงก์อัตโนมัติสำเร็จ! (เพิ่มใหม่ ${data.created.length} รายการ, เชื่อมโยง Co-author ${data.linked.length} รายการ)`);
       setScholarFeedbackType('success');
-      await fetchUserPapers(id); // ดึงข้อมูลที่เพิ่งซิงก์เสร็จมาแสดง
+      await fetchUserPapers(id);
     } catch (error) {
       console.error(error);
       setScholarFeedback('❌ ซิงก์อัตโนมัติไม่สำเร็จ โปรดลองกดปุ่มซิงก์ใหม่อีกครั้ง');
       setScholarFeedbackType('error');
     } finally {
       setIsSyncing(false);
+    }
+  };
+
+  const fetchScopusMetrics = async (targetId) => {
+    const id = (typeof targetId === 'number' || typeof targetId === 'string') ? targetId : selectedProfId;
+    if (!id) return;
+    try {
+      const res = await api.get(`/users/${id}/scopus-metrics`);
+      if (res.data.success) {
+        setScopusMetrics(res.data.data);
+      } else {
+        setScopusMetrics(null);
+      }
+    } catch (error) {
+      console.error('Fetch Scopus metrics failed:', error);
+      setScopusMetrics(null);
+    }
+  };
+
+  const triggerScopusSync = async (targetId) => {
+    const id = (typeof targetId === 'number' || typeof targetId === 'string') ? targetId : selectedProfId;
+    if (!id) return;
+    
+    setIsSyncingScopus(true);
+    setScopusFeedback('🔄 กำลังดึงข้อมูลจาก Scopus...');
+    setScopusFeedbackType('success');
+    
+    try {
+      const res = await api.post(`/sync-scopus/${id}`);
+      const data = res.data;
+      setScopusFeedback(`✓ ซิงก์ Scopus สำเร็จ! (เพิ่มใหม่ ${data.stats?.createdCount || 0} รายการ, เชื่อมโยง ${data.stats?.linkedCount || 0} รายการ)`);
+      setScopusFeedbackType('success');
+      await fetchUserPapers(id);
+      await fetchScopusMetrics(id);
+    } catch (error) {
+      console.error(error);
+      if (error.response?.status === 429) {
+        setScopusFeedback('⚠️ เซิร์ฟเวอร์ Scopus กำลังทำงานหนัก กรุณาลองใหม่อีก 1 นาที');
+        setScopusFeedbackType('error');
+      } else {
+        setScopusFeedback('❌ ซิงก์ Scopus ไม่สำเร็จ โปรดลองใหม่อีกครั้ง');
+        setScopusFeedbackType('error');
+      }
+    } finally {
+      setIsSyncingScopus(false);
     }
   };
 
@@ -418,6 +475,17 @@ export default function ScholarDashboard({ onImportToForm }) {
                     {isSyncing ? 'กำลังซิงก์...' : 'ซิงก์'}
                   </button>
                 )}
+
+                {currentUser?.scopus_id && (
+                  <button 
+                    onClick={() => triggerScopusSync()}
+                    disabled={isSyncingScopus}
+                    style={{ background: '#0288D1', color: 'white', border: 'none', padding: '4px 10px', borderRadius: '12px', cursor: isSyncingScopus ? 'not-allowed' : 'pointer', fontSize: '12px', display: 'flex', alignItems: 'center', gap: '4px', marginLeft: '4px', opacity: isSyncingScopus ? 0.7 : 1 }}
+                  >
+                    <RefreshCw size={12} className={isSyncingScopus ? "spin" : ""} />
+                    {isSyncingScopus ? 'กำลังซิงก์...' : 'ซิงก์ Scopus'}
+                  </button>
+                )}
               </div>
             )}
           </div>
@@ -429,6 +497,11 @@ export default function ScholarDashboard({ onImportToForm }) {
             {scholarFeedback}
           </p>
         )}
+        {scopusFeedback && (
+          <p style={{ margin: '4px 0 0 0', fontSize: '13px', color: scopusFeedbackType === 'error' ? '#ef4444' : '#166534', fontWeight: '500' }}>
+            {scopusFeedback}
+          </p>
+        )}
       </div>
 
       {/* 2. กล่องสถิติ (Stats Grid) */}
@@ -437,7 +510,9 @@ export default function ScholarDashboard({ onImportToForm }) {
           { label: 'ผลงานทั้งหมด', value: papers.length, icon: <BookOpen size={24} />, color: '#3b82f6', bg: '#eff6ff' },
           { label: 'รอยืนยัน (% ภาระงาน)', value: pendingCount, icon: <Clock size={24} />, color: '#f59e0b', bg: '#fef3c7' },
           { label: 'ยืนยันเรียบร้อยแล้ว', value: confirmedCount, icon: <CheckCircle2 size={24} />, color: '#10b981', bg: '#dcfce7' },
-          { label: 'ยอดการอ้างอิงรวม', value: totalCitations, icon: <Award size={24} />, color: '#8b5cf6', bg: '#f3e8ff' }
+          { label: 'ยอดการอ้างอิงรวม', value: totalCitations, icon: <Award size={24} />, color: '#8b5cf6', bg: '#f3e8ff' },
+          { label: 'Scopus H-Index', value: scopusMetrics?.hIndex || '-', icon: <GraduationCap size={24} />, color: '#0288D1', bg: '#e1f5fe' },
+          { label: 'Scopus Citations', value: scopusMetrics?.citedByCount || '-', icon: <BookMarked size={24} />, color: '#00acc1', bg: '#e0f7fa' }
         ].map((stat, idx) => (
           <div key={idx} style={{ display: 'flex', alignItems: 'center', gap: '16px', background: 'white', border: '1px solid #e2e8f0', padding: '20px', borderRadius: '8px', boxShadow: '0 1px 2px rgba(0,0,0,0.05)' }}>
             <div style={{ background: stat.bg, color: stat.color, padding: '12px', borderRadius: '8px', display: 'flex' }}>

@@ -57,8 +57,12 @@ export default function MyScholarDashboard({ onImportToForm }) {
   const [scholarIdInput, setScholarIdInput] = useState('');
   const [isSavingScholarId, setIsSavingScholarId] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
+  const [isSyncingScopus, setIsSyncingScopus] = useState(false);
   const [scholarFeedback, setScholarFeedback] = useState('');
   const [scholarFeedbackType, setScholarFeedbackType] = useState('success');
+  const [scopusMetrics, setScopusMetrics] = useState(null);
+  const [scopusFeedback, setScopusFeedback] = useState('');
+  const [scopusFeedbackType, setScopusFeedbackType] = useState('success');
   const [searchQuery, setSearchQuery] = useState('');
   const [filterStatus, setFilterStatus] = useState('ALL');
   const [isEditingScholarId, setIsEditingScholarId] = useState(false);
@@ -99,13 +103,31 @@ export default function MyScholarDashboard({ onImportToForm }) {
     }
   }, [user]);
 
+  const fetchScopusMetrics = useCallback(async () => {
+    if (!user?.id || !user?.scopus_id) return;
+    try {
+      const res = await api.get(`/users/${user.id}/scopus-metrics`);
+      if (res.data.success) {
+        setScopusMetrics(res.data.data);
+      } else {
+        setScopusMetrics(null);
+      }
+    } catch (error) {
+      console.error('Fetch Scopus metrics failed:', error);
+      setScopusMetrics(null);
+    }
+  }, [user]);
+
   useEffect(() => {
     if (user?.id && user?.scholar_id) {
       fetchUserPapers(user.id);
     } else if (user?.id) {
       setIsLoadingPapers(false);
     }
-  }, [user]);
+    if (user?.id && user?.scopus_id) {
+      fetchScopusMetrics();
+    }
+  }, [user, fetchUserPapers, fetchScopusMetrics]);
 
   const saveScholarId = async () => {
     if (!user?.id) return;
@@ -146,6 +168,34 @@ export default function MyScholarDashboard({ onImportToForm }) {
       setScholarFeedbackType('error');
     } finally {
       setIsSyncing(false);
+    }
+  };
+
+  const triggerScopusSync = async () => {
+    if (!user?.id) return;
+
+    setIsSyncingScopus(true);
+    setScopusFeedback('🔄 กำลังดึงข้อมูลจาก Scopus...');
+    setScopusFeedbackType('success');
+
+    try {
+      const res = await api.post(`/sync-scopus/${user.id}`);
+      const data = res.data;
+      setScopusFeedback(`✓ ซิงก์ Scopus สำเร็จ! (เพิ่มใหม่ ${data.stats?.createdCount || 0} รายการ)`);
+      setScopusFeedbackType('success');
+      await fetchUserPapers(user.id);
+      await fetchScopusMetrics();
+    } catch (error) {
+      console.error(error);
+      if (error.response?.status === 429) {
+        setScopusFeedback('⚠️ เซิร์ฟเวอร์ Scopus กำลังทำงานหนัก กรุณาลองใหม่อีก 1 นาที');
+        setScopusFeedbackType('error');
+      } else {
+        setScopusFeedback('❌ ซิงก์ Scopus ไม่สำเร็จ โปรดลองใหม่อีกครั้ง');
+        setScopusFeedbackType('error');
+      }
+    } finally {
+      setIsSyncingScopus(false);
     }
   };
 
@@ -264,6 +314,17 @@ export default function MyScholarDashboard({ onImportToForm }) {
                     {isSyncing ? 'กำลังซิงก์...' : 'ซิงก์'}
                   </button>
                 )}
+
+                {user?.scopus_id && (
+                  <button
+                    onClick={triggerScopusSync}
+                    disabled={isSyncingScopus}
+                    style={{ background: '#0288D1', color: 'white', border: 'none', padding: '4px 10px', borderRadius: '12px', cursor: isSyncingScopus ? 'not-allowed' : 'pointer', fontSize: '12px', display: 'flex', alignItems: 'center', gap: '4px', marginLeft: '4px', opacity: isSyncingScopus ? 0.7 : 1 }}
+                  >
+                    <RefreshCw size={12} className={isSyncingScopus ? "spin" : ""} />
+                    {isSyncingScopus ? 'กำลังซิงก์...' : 'ซิงก์ Scopus'}
+                  </button>
+                )}
               </div>
             )}
           </div>
@@ -274,6 +335,11 @@ export default function MyScholarDashboard({ onImportToForm }) {
             {scholarFeedback}
           </p>
         )}
+        {scopusFeedback && (
+          <p style={{ margin: '4px 0 0 0', fontSize: '13px', color: scopusFeedbackType === 'error' ? '#ef4444' : '#166534', fontWeight: '500' }}>
+            {scopusFeedback}
+          </p>
+        )}
       </div>
 
       {/* 2. กล่องสถิติ (Stats Grid) */}
@@ -282,7 +348,9 @@ export default function MyScholarDashboard({ onImportToForm }) {
           { label: 'ผลงานทั้งหมด', value: papers.length, icon: <BookOpen size={24} />, color: '#3b82f6', bg: '#eff6ff' },
           { label: 'รอยืนยัน (% ภาระงาน)', value: pendingCount, icon: <Clock size={24} />, color: '#f59e0b', bg: '#fef3c7' },
           { label: 'ยืนยันเรียบร้อยแล้ว', value: confirmedCount, icon: <CheckCircle2 size={24} />, color: '#10b981', bg: '#dcfce7' },
-          { label: 'ยอดการอ้างอิงรวม', value: totalCitations, icon: <Award size={24} />, color: '#8b5cf6', bg: '#f3e8ff' }
+          { label: 'ยอดการอ้างอิงรวม', value: totalCitations, icon: <Award size={24} />, color: '#8b5cf6', bg: '#f3e8ff' },
+          { label: 'Scopus H-Index', value: scopusMetrics?.hIndex || '-', icon: <GraduationCap size={24} />, color: '#0288D1', bg: '#e1f5fe' },
+          { label: 'Scopus Citations', value: scopusMetrics?.citedByCount || '-', icon: <BookMarked size={24} />, color: '#00acc1', bg: '#e0f7fa' }
         ].map((stat, idx) => (
           <div key={idx} style={{ display: 'flex', alignItems: 'center', gap: '16px', background: 'white', border: '1px solid #e2e8f0', padding: '20px', borderRadius: '8px', boxShadow: '0 1px 2px rgba(0,0,0,0.05)' }}>
             <div style={{ background: stat.bg, color: stat.color, padding: '12px', borderRadius: '8px', display: 'flex' }}>

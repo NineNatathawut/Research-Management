@@ -17,6 +17,7 @@ const {
   fetchDirectFromGoogleScholarProfile,
   savePaperAndAuthor
 } = require("./scholarService");
+const { getAuthorMetrics, getAuthorPapers, computeMetricsFromPapers } = require("./services/scopusService");
 const { initScholarCron, getCronStatus } = require("./cronService");
 require("dotenv").config();
 
@@ -34,6 +35,7 @@ app.use("/api/auth", authRoutes);
 
 // In-memory lock ป้องกันการซิงก์ Google Scholar ซ้อนกัน
 let isSyncRunning = false;
+let isScopusSyncRunning = false;
 
 /* ==========================================
    MinIO Client & Graceful Local Storage Fallback
@@ -573,16 +575,17 @@ app.put("/api/users/:userId/scholar-id", async (req, res) => {
 app.get("/api/users/:userId/papers", async (req, res) => {
   const { userId } = req.params;
   try {
-    const query = `
-      SELECT 
-        p.id AS paper_id,
-        p.title,
-        p.publish_year,
-        p.authors_raw,
-        p.cited_by,
-        p.scholar_url,
-        p.source,
-        p.status AS paper_status,
+const query = `
+       SELECT 
+         p.id AS paper_id,
+         p.title,
+         p.publish_year,
+         p.authors_raw,
+         p.cited_by,
+         p.scholar_url,
+         p.scopus_eid,
+         p.source,
+         p.status AS paper_status,
         pa.id AS author_entry_id,
         pa.contribution_percent,
         pa.is_first_author,
@@ -789,6 +792,202 @@ app.post("/api/papers/reject", async (req, res) => {
   } catch (error) {
     console.error("[Reject Paper Error]:", error);
     res.status(500).json({ error: "ปฏิเสธผลงานไม่สำเร็จ", details: error.message });
+  }
+});
+
+// 3.8 ดึงค่า Scopus Metrics ของอาจารย์รายบุคคล
+app.get("/api/users/:userId/scopus-metrics", async (req, res) => {
+  const { userId } = req.params;
+  try {
+    const [users] = await pool.query('SELECT scopus_id FROM users WHERE id = ?', [userId]);
+    if (users.length === 0) {
+      return res.status(404).json({ error: "ไม่พบผู้ใช้" });
+    }
+    const scopusId = users[0].scopus_id;
+    if (!scopusId) {
+      return res.status(400).json({ error: "ผู้ใช้นี้ยังไม่ได้ตั้งค่า Scopus ID" });
+    }
+
+    const metrics = await getAuthorMetrics(scopusId);
+    res.json({ success: true, data: metrics });
+  } catch (error) {
+    console.error(`[Scopus Metrics Error] User ${userId}:`, error.message);
+    res.status(500).json({ error: "ดึงข้อมูล Scopus Metrics ไม่สำเร็จ", details: error.message });
+  }
+});
+
+// 3.9 สั่ง Sync Scopus ข้อมูลอาจารย์รายบุคคล (พร้อม Transaction)
+app.post("/api/sync-scopus/:userId", async (req, res) => {
+  const { userId } = req.params;
+  if (isScopusSyncRunning) {
+    return res.status(409).json({ error: "Sync already in progress", message: "กำลังมีการประมวลผลดึงข้อมูล Scopus กรุณารอสักครู่" });
+  }
+
+  isScopusSyncRunning = true;
+  const startTime = Date.now();
+
+  try {
+    const [users] = await pool.query('SELECT scopus_id, name_en FROM users WHERE id = ?', [userId]);
+    if (users.length === 0) {
+      return res.status(404).json({ error: "ไม่พบผู้ใช้" });
+    }
+    const scopusId = users[0].scopus_id;
+    if (!scopusId) {
+      return res.status(400).json({ error: "ผู้ใช้นี้ยังไม่ได้ตั้งค่า Scopus ID" });
+    }
+
+    // 1. ดึง Papers ก่อน
+    const papers = await getAuthorPapers(scopusId);
+
+    // 2. ดึง Metrics (ถ้า Author API ไม่พร้อม ใช้การคำนวณจาก papers แทน)
+    const metrics = await getAuthorMetrics(scopusId) || computeMetricsFromPapers(papers);
+
+    // 3. ใช้ Transaction บันทึกลง DB
+    const connection = await pool.getConnection();
+    try {
+      await connection.beginTransaction();
+
+      // อัปเดตหรือบันทึก Metrics ลง users table
+      if (metrics) {
+        await connection.query(
+          `UPDATE users SET h_index = COALESCE(?, h_index), total_citations = COALESCE(?, total_citations) WHERE id = ?`,
+          [metrics.hIndex, metrics.citedByCount, userId]
+        );
+      }
+
+      let createdCount = 0;
+      let linkedCount = 0;
+
+      for (const paper of papers) {
+        if (!paper.title || !paper.eid) continue;
+
+        // เช็คว่ามี paper นี้อยู่แล้วหรือยัง (ใช้ scopus_eid หรือ doi เป็น unique key)
+        const [existing] = await connection.query(
+          `SELECT id FROM papers WHERE scopus_eid = ? OR (doi = ? AND doi IS NOT NULL) LIMIT 1`,
+          [paper.eid, paper.doi || null]
+        );
+
+        let paperId;
+        if (existing.length > 0) {
+          paperId = existing[0].id;
+          // อัปเดตข้อมูลหากมีใหม่กว่า
+          await connection.query(
+            `UPDATE papers SET cited_by = GREATEST(cited_by, ?), publish_year = COALESCE(?, publish_year) WHERE id = ?`,
+            [paper.citedBy, paper.coverDate, paperId]
+          );
+        } else {
+          // INSERT ใหม่
+          const [insertRes] = await connection.query(
+            `INSERT INTO papers (title, publish_year, authors_raw, cited_by, scopus_eid, doi, source, status) 
+             VALUES (?, ?, ?, ?, ?, ?, 'scopus', 'DRAFT_AUTO')`,
+            [paper.title, paper.coverDate, JSON.stringify(paper.authors.map(a => a.name)), paper.citedBy, paper.eid, paper.doi || null]
+          );
+          paperId = insertRes.insertId;
+          createdCount++;
+        }
+
+        // เพิ่ม author link ให้ผู้ใช้ปัจจุบัน
+        const [authorCheck] = await connection.query(
+          `SELECT id FROM paper_authors WHERE paper_id = ? AND user_id = ?`,
+          [paperId, userId]
+        );
+        if (authorCheck.length === 0) {
+          await connection.query(
+            `INSERT IGNORE INTO paper_authors (paper_id, user_id, status, contribution_percent) VALUES (?, ?, 'PENDING', 0.00)`,
+            [paperId, userId]
+          );
+          linkedCount++;
+        }
+
+        // 4. Auto-detect Co-authors: เทียบ Scopus ID กับ users table
+        const allUsers = await connection.query('SELECT id, scopus_id FROM users WHERE id != ?', [userId]);
+        for (const coAuthor of paper.authors) {
+          if (!coAuthor.scopusId) continue;
+          const matchedUser = allUsers[0].find(u => u.scopus_id === coAuthor.scopusId);
+          if (matchedUser) {
+            const [existingLink] = await connection.query(
+              `SELECT id FROM paper_authors WHERE paper_id = ? AND user_id = ?`,
+              [paperId, matchedUser.id]
+            );
+            if (existingLink.length === 0) {
+              await connection.query(
+                `INSERT IGNORE INTO paper_authors (paper_id, user_id, status, contribution_percent, author_order) 
+                 VALUES (?, ?, 'PENDING', 0.00, ?)`,
+                [paperId, matchedUser.id, coAuthor.order]
+              );
+              console.log(`[Scopus Auto-detect] เชื่อมโยงผู้แต่งร่วม ${coAuthor.name} (User ${matchedUser.id}) -> Paper ${paperId}`);
+            }
+          }
+        }
+      }
+
+      await connection.commit();
+
+      const duration = Date.now() - startTime;
+      res.json({
+        message: "Sync Scopus completed",
+        durationMs: duration,
+        stats: {
+          totalFetched: papers.length,
+          createdCount,
+          linkedCount,
+          metrics: metrics || null
+        }
+      });
+    } catch (dbErr) {
+      await connection.rollback();
+      throw dbErr;
+    } finally {
+      connection.release();
+    }
+  } catch (error) {
+    console.error(`[Sync Scopus User ${userId} Error]:`, error.message);
+    res.status(500).json({ error: "Sync Scopus failed", details: error.message });
+  } finally {
+    isScopusSyncRunning = false;
+  }
+});
+
+// 3.10 สั่ง Sync Scopus ข้อมูลอาจารย์ทั้งหมด
+app.post("/api/sync-scopus", async (req, res) => {
+  if (isScopusSyncRunning) {
+    return res.status(409).json({ error: "Sync already in progress", message: "กำลังมีการประมวลผลดึงข้อมูล Scopus กรุณารอสักครู่" });
+  }
+
+  isScopusSyncRunning = true;
+  const startTime = Date.now();
+
+  try {
+    const [users] = await pool.query('SELECT id, scopus_id, name_en FROM users WHERE scopus_id IS NOT NULL ORDER BY id ASC');
+    const aggregate = {
+      processedCount: 0,
+      totalPapers: 0,
+      createdCount: 0,
+      errors: []
+    };
+
+    for (const user of users) {
+      try {
+        const metrics = await getAuthorMetrics(user.scopus_id);
+        const papers = await getAuthorPapers(user.scopus_id);
+        aggregate.totalPapers += papers.length;
+        aggregate.processedCount++;
+      } catch (err) {
+        aggregate.errors.push({ userId: user.id, userEmail: user.name_en, error: err.message });
+      }
+    }
+
+    const duration = Date.now() - startTime;
+    res.json({
+      message: "Bulk Scopus sync completed",
+      durationMs: duration,
+      stats: aggregate
+    });
+  } catch (error) {
+    console.error("[Bulk Sync Scopus Error]:", error.message);
+    res.status(500).json({ error: "Bulk sync failed", details: error.message });
+  } finally {
+    isScopusSyncRunning = false;
   }
 });
 

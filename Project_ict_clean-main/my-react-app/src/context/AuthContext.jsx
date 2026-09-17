@@ -6,13 +6,25 @@ const API_URL = "http://localhost:5000/api";
 const AuthContext = createContext(null);
 
 export function AuthProvider({ children }) {
-  const [user, setUser] = useState(null); // พักไว้จนกว่าจะแก้ไมโคซอฟได้
+  const [user, setUser] = useState(null);
   const [authLoading, setAuthLoading] = useState(true);
   const [isLoggingIn, setIsLoggingIn] = useState(false);
   const [authError, setAuthError] = useState("");
   const [toast, setToast] = useState("");
 
-  // 1. ดักจับ Token จาก URL หรือ localStorage เมื่อเริ่มต้นระบบ
+  // 🟢 Dev Mode: สลับ User ทดสอบได้โดยไม่กระทบโค้ดหลัก
+  const loginAs = (userType) => {
+    if (import.meta.env.DEV) {
+      if (userType === 'nattapon') {
+        setUser({ id: 1, email: 'dev@up.ac.th', name_th: 'นัฐพล ทดสอบ', name_en: 'Nattapon Test', department: 'Information Technology', position: 'อาจารย์', scholar_id: 'm8nS_k8AAAAJ', role: 'ajarn' });
+      } else if (userType === 'other') {
+        setUser({ id: 2, email: 'other@up.ac.th', name_th: 'อาจารย์ สมชาย', name_en: 'Somchai', department: 'Computer Science', position: 'รองศาสตราจารย์', scholar_id: 'r_L19W8AAAAJ', role: 'ajarn' });
+      } else if (userType === 'admin') {
+        setUser({ id: 99, email: 'admin@up.ac.th', name_th: 'แอดมิน ระบบ', name_en: 'Admin System', department: 'IT', position: 'แอดมิน', scholar_id: null, role: 'admin' });
+      }
+    }
+  };
+
   useEffect(() => {
     const urlParams = new URLSearchParams(window.location.search);
     const tokenFromUrl = urlParams.get("token");
@@ -56,18 +68,17 @@ export function AuthProvider({ children }) {
           setAuthLoading(false);
         });
     } else {
-      // Dev mode: auto-create mock user for testing without Microsoft login
       if (process.env.NODE_ENV === 'development') {
         const mockUser = {
           id: 1,
           email: 'dev@up.ac.th',
-          full_name: 'Developer Test',
-          name_en: 'Dev User',
-          name_th: 'นักพัฒนา ทดสอบ',
+          full_name: 'นัฐพล ทดสอบ',
+          name_en: 'Nattapon Test',
+          name_th: 'นัฐพล ทดสอบ',
           department: 'Information Technology',
           position: 'อาจารย์',
-          scholar_id: null,
-          role: 'admin'
+          scholar_id: 'm8nS_k8AAAAJ',
+          role: 'ajarn'
         };
         setUser(mockUser);
         localStorage.setItem('auth_token', 'dev-mock-token');
@@ -76,7 +87,6 @@ export function AuthProvider({ children }) {
     }
   }, []);
 
-  // 2. ฟังก์ชันเริ่มล็อกอินผ่าน Microsoft OAuth
   const loginWithMicrosoft = async () => {
     try {
       setIsLoggingIn(true);
@@ -96,26 +106,21 @@ export function AuthProvider({ children }) {
     }
   };
 
-  // 2.1 ฟังก์ชันล็อกอินด้วย Email & Password (เฉพาะ @up.ac.th)
   const loginWithEmail = async (email, password) => {
     try {
       setIsLoggingIn(true);
       setAuthError("");
-
       const res = await fetch(`${API_URL}/auth/login`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email, password }),
       });
-
       const data = await res.json();
-
       if (!res.ok || !data.success) {
         setAuthError(data.message || "การเข้าสู่ระบบไม่สำเร็จ");
         setIsLoggingIn(false);
         return false;
       }
-
       if (data.token) {
         localStorage.setItem("auth_token", data.token);
       }
@@ -133,14 +138,12 @@ export function AuthProvider({ children }) {
     }
   };
 
-  // 3. ฟังก์ชันออกจากระบบ
   const logout = () => {
     localStorage.removeItem("auth_token");
     setUser(null);
     setToast("ออกจากระบบเรียบร้อยแล้ว");
   };
 
-  // ซ่อน Toast อัตโนมัติหลัง 2.6 วินาที
   useEffect(() => {
     if (!toast) return;
     const timer = setTimeout(() => setToast(""), 2600);
@@ -160,6 +163,7 @@ export function AuthProvider({ children }) {
         loginWithMicrosoft,
         loginWithEmail,
         logout,
+        loginAs,
         token: localStorage.getItem("auth_token"),
       }}
     >

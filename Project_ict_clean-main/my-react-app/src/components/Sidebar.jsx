@@ -10,7 +10,8 @@ import {
   GraduationCap,
   Users,
   FileText,
-  Sparkles
+  Sparkles,
+  User
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 
@@ -33,7 +34,7 @@ export default function Sidebar({ tab, setTab, entriesCount }) {
       {/* Main Action Button: + เพิ่มผลงานใหม่ */}
       <button 
         type="button"
-        onClick={() => setTab('form')}
+        onClick={() => setTab('my-scholar')}
         className="btn-sidebar-add-new"
       >
         <Plus size={16} />
@@ -60,17 +61,10 @@ export default function Sidebar({ tab, setTab, entriesCount }) {
           className={`sidebar-menu-btn ${tab === 'form' ? 'active' : ''}`}
         >
           <BookMarked size={18} />
-          <span>ผลงานวิชาการ (คำนวณ)</span>
+          <span>คำนวณ / วางแผน</span>
         </button>
 
-        <button
-          type="button"
-          onClick={() => setTab('form')}
-          className="sidebar-menu-btn"
-        >
-          <Calculator size={18} />
-          <span>การวางแผน</span>
-        </button>
+
 
         <button
           type="button"
@@ -100,14 +94,17 @@ export default function Sidebar({ tab, setTab, entriesCount }) {
           <span>ผลงานวิจัย & Google Scholar</span>
         </button>
 
-        <button
-          type="button"
-          onClick={() => setTab('pdf-upload')}
-          className={`sidebar-menu-btn ${tab === 'pdf-upload' ? 'active' : ''}`}
-        >
-          <Sparkles size={18} />
-          <span>อัปโหลด PDF (AI สกัดข้อมูล)</span>
-        </button>
+        {user?.role === 'ajarn' && user?.scholar_id && (
+          <button
+            type="button"
+            onClick={() => setTab('my-scholar')}
+            className={`sidebar-menu-btn ${tab === 'my-scholar' ? 'active' : ''}`}
+          >
+            <User size={18} />
+            <span>ผลงานของฉัน</span>
+          </button>
+        )}
+
       </nav>
 
       {/* Bottom Settings & Logout */}

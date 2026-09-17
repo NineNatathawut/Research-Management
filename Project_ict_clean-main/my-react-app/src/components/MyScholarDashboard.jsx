@@ -1,18 +1,15 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
-import { 
-  GraduationCap, 
-  Search, 
-  User, 
-  Users, 
-  Mail, 
-  Save, 
-  RefreshCw, 
-  ChevronLeft, 
-  ChevronRight,
+import {
+  GraduationCap,
+  Search,
+  User,
+  Save,
+  RefreshCw,
+  ChevronLeft,
   CheckCircle2,
   Clock,
-  Trash2,
   Edit3,
+  ExternalLink,
   BookOpen,
   Award,
   AlertCircle,
@@ -20,11 +17,14 @@ import {
   Filter,
   X,
   BookMarked,
+  Calendar,
   Coins,
   LayoutGrid,
-  List
+  List,
+  Loader2
 } from 'lucide-react';
 import api from '../api/client';
+import { useAuth } from '../context/AuthContext';
 import PaperCard from './PaperCard';
 
 const DEPARTMENT_ORDER = [
@@ -42,7 +42,7 @@ function parsePosition(position) {
   if (!position) return { specialRoles: [], academicRank: '' };
   const parts = position.split('/').map(p => p.trim());
   const specialKeywords = [
-    'ประธานหลักสูตร', 'ประธาน', 'รองคณบดี', 'ผู้ช่วยคณบดี', 
+    'ประธานหลักสูตร', 'ประธาน', 'รองคณบดี', 'ผู้ช่วยคณบดี',
     'รองอธิการบดี', 'คณบดี', 'ประธานคณะ'
   ];
   const specialRoles = parts.filter(p => specialKeywords.some(k => p.includes(k)));
@@ -50,12 +50,10 @@ function parsePosition(position) {
   return { specialRoles, academicRank };
 }
 
-export default function ScholarDashboard({ onImportToForm }) {
-  const [users, setUsers] = useState([]);
-  const [selectedDept, setSelectedDept] = useState(null);
-  const [selectedProfId, setSelectedProfId] = useState(null);
+export default function MyScholarDashboard({ onImportToForm }) {
+  const { user } = useAuth();
   const [papers, setPapers] = useState([]);
-  const [isLoadingPapers, setIsLoadingPapers] = useState(false);
+  const [isLoadingPapers, setIsLoadingPapers] = useState(true);
   const [scholarIdInput, setScholarIdInput] = useState('');
   const [isSavingScholarId, setIsSavingScholarId] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
@@ -63,36 +61,13 @@ export default function ScholarDashboard({ onImportToForm }) {
   const [scholarFeedbackType, setScholarFeedbackType] = useState('success');
   const [searchQuery, setSearchQuery] = useState('');
   const [filterStatus, setFilterStatus] = useState('ALL');
-  const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(true);
   const [isEditingScholarId, setIsEditingScholarId] = useState(false);
 
-  const departments = useMemo(() => {
-    const existingDepts = [...new Set(users.map(u => u.department).filter(Boolean))];
-    return existingDepts.sort((a, b) => {
-      const indexA = DEPARTMENT_ORDER.indexOf(a);
-      const indexB = DEPARTMENT_ORDER.indexOf(b);
-      if (indexA !== -1 && indexB !== -1) return indexA - indexB;
-      if (indexA !== -1) return -1;
-      if (indexB !== -1) return 1;
-      return a.localeCompare(b);
-    });
-  }, [users]);
-
-  const professorsByDept = useMemo(() => {
-    if (!selectedDept) return [];
-    return users.filter(u => u.department === selectedDept);
-  }, [users, selectedDept]);
-
-  const currentUser = useMemo(() => {
-    if (!selectedProfId) return null;
-    return users.find(u => u.id === selectedProfId) || null;
-  }, [users, selectedProfId]);
-
-  const pendingCount = useMemo(() => 
+  const pendingCount = useMemo(() =>
     papers.filter(p => p.author_status === 'PENDING').length, [papers]);
-  const confirmedCount = useMemo(() => 
+  const confirmedCount = useMemo(() =>
     papers.filter(p => p.author_status === 'CONFIRMED').length, [papers]);
-  const totalCitations = useMemo(() => 
+  const totalCitations = useMemo(() =>
     papers.reduce((sum, p) => sum + (Number(p.cited_by) || 0), 0), [papers]);
 
   const filteredPapers = useMemo(() => {
@@ -109,62 +84,37 @@ export default function ScholarDashboard({ onImportToForm }) {
     });
   }, [papers, filterStatus, searchQuery]);
 
-  const fetchUsers = useCallback(async () => {
+  const fetchUserPapers = useCallback(async (targetId) => {
+    const id = (typeof targetId === 'number' || typeof targetId === 'string') ? targetId : user?.id;
+    if (!id) return;
+
+    setIsLoadingPapers(true);
     try {
-      const res = await api.get('/users');
-      setUsers(res.data);
+      const res = await api.get(`/users/${id}/papers`);
+      setPapers(res.data);
     } catch (error) {
-      console.error('Fetch users failed:', error);
+      console.error('Fetch papers failed:', error);
+    } finally {
+      setIsLoadingPapers(false);
     }
-  }, []);
+  }, [user]);
 
   useEffect(() => {
-    fetchUsers();
-  }, [fetchUsers]);
-
-  const changeDepartment = (dept) => {
-    setSelectedDept(dept);
-    setSelectedProfId(null);
-    setScholarFeedback('');
-  };
-
-  const selectProfessor = (id) => {
-    setSelectedProfId(id);
-    handleUserChange(id); // ส่ง ID ไปตรงๆ เพื่อให้ฟังก์ชันทำงานได้ทันที
-  };
-
-  const clearSelection = () => {
-    setSelectedProfId(null);
-    setScholarFeedback('');
-  };
-
-  const handleUserChange = (id) => {
-    const user = users.find(u => u.id === id);
-    if (user) {
-      setScholarIdInput(user.scholar_id || '');
+    if (user?.id && user?.scholar_id) {
+      fetchUserPapers(user.id);
+    } else if (user?.id) {
+      setIsLoadingPapers(false);
     }
-    setScholarFeedback('');
-
-    // 1. สั่งดึงข้อมูลเดิมจาก Database มาแสดงบนหน้าเว็บ "ทันที"
-    fetchUserPapers(id);
-
-    // 2. ถ้ามี Scholar ID ให้สั่งบอทไปดึงผลงานใหม่แบบ "เบื้องหลัง" (ไม่บล็อกหน้าจอ)
-    if (user && user.scholar_id) {
-      triggerScholarSync(id);
-    }
-  };
+  }, [user]);
 
   const saveScholarId = async () => {
-    if (!selectedProfId) return;
+    if (!user?.id) return;
     setIsSavingScholarId(true);
     setScholarFeedback('');
     try {
-      const res = await api.put(`/users/${selectedProfId}/scholar-id`, {
+      const res = await api.put(`/users/${user.id}/scholar-id`, {
         scholarId: scholarIdInput
       });
-      if (currentUser) {
-        currentUser.scholar_id = res.data.user.scholar_id;
-      }
       setScholarFeedback('✓ บันทึก Scholar ID สำเร็จ');
       setScholarFeedbackType('success');
       setTimeout(() => setScholarFeedback(''), 3000);
@@ -177,64 +127,25 @@ export default function ScholarDashboard({ onImportToForm }) {
     }
   };
 
-  const triggerScholarSync = async (targetId) => {
-    // ป้องกันกรณีปุ่ม onClick ส่ง MouseEvent เข้ามาแทน ID
-    const id = (typeof targetId === 'number' || typeof targetId === 'string') ? targetId : selectedProfId;
-    if (!id) return;
-    
+  const triggerScholarSync = async () => {
+    if (!user?.id) return;
+
     setIsSyncing(true);
     setScholarFeedback('🔄 กำลังดึงผลงานล่าสุดจาก Google Scholar แบบอัตโนมัติ...');
-    setScholarFeedbackType('success'); // ใช้สีเขียวเพื่อแสดงสถานะกำลังโหลด
-    
+    setScholarFeedbackType('success');
+
     try {
-      const res = await api.post(`/sync-scholar/${id}`);
+      const res = await api.post(`/sync-scholar/${user.id}`);
       const data = res.data.data;
       setScholarFeedback(`✓ ซิงก์อัตโนมัติสำเร็จ! (เพิ่มใหม่ ${data.created.length} รายการ, เชื่อมโยง Co-author ${data.linked.length} รายการ)`);
       setScholarFeedbackType('success');
-      await fetchUserPapers(id); // ดึงข้อมูลที่เพิ่งซิงก์เสร็จมาแสดง
+      await fetchUserPapers(user.id);
     } catch (error) {
       console.error(error);
       setScholarFeedback('❌ ซิงก์อัตโนมัติไม่สำเร็จ โปรดลองกดปุ่มซิงก์ใหม่อีกครั้ง');
       setScholarFeedbackType('error');
     } finally {
       setIsSyncing(false);
-    }
-  };
-
-  const fetchUserPapers = async (targetId) => {
-    const id = (typeof targetId === 'number' || typeof targetId === 'string') ? targetId : selectedProfId;
-    if (!id) return;
-    
-    setIsLoadingPapers(true);
-    try {
-      const res = await api.get(`/users/${id}/papers`);
-      setPapers(res.data);
-    } catch (error) {
-      console.error('Fetch papers failed:', error);
-    } finally {
-      setIsLoadingPapers(false);
-    }
-  };
-
-  const handlePaperRejected = (paperId) => {
-    setPapers(prev => prev.filter(p => p.paper_id !== paperId));
-  };
-
-  const handleConfirmPaper = async (paper, newContribution, isFirstAuthor, isCorresponding) => {
-    try {
-      await api.put(`(papers/${paper.paper_id}/confirm`, {
-        userId: selectedProfId,
-        contributionPercent: newContribution,
-        isFirstAuthor,
-        isCorresponding
-      });
-      setPapers(prev => prev.map(p => 
-        p.paper_id === paper.paper_id 
-          ? { ...p, contribution_percent: newContribution, is_first_author: isFirstAuthor, is_corresponding: isCorresponding, author_status: 'CONFIRMED' }
-          : p
-      ));
-    } catch (error) {
-      console.error('Confirm paper error:', error);
     }
   };
 
@@ -249,7 +160,7 @@ export default function ScholarDashboard({ onImportToForm }) {
       issue: paper.issue || '',
       abstract: paper.abstract || '',
       keywords: paper.keywords || '',
-      authorName: currentUser?.name_th || currentUser?.name_en || '',
+      authorName: user?.name_th || user?.name_en || user?.full_name || '',
       correspondingAuthor: paper.corresponding_author || '',
       proportion: paper.contribution_percent || 100,
     };
@@ -258,137 +169,72 @@ export default function ScholarDashboard({ onImportToForm }) {
     }
   };
 
-  if (!selectedProfId) {
+  const handleConfirmPaper = async (paper, newContribution, isFirstAuthor, isCorresponding) => {
+    if (!user?.id) return;
+    try {
+      await api.put(`/papers/${paper.paper_id}/confirm`, {
+        userId: user.id,
+        contributionPercent: newContribution,
+        isFirstAuthor,
+        isCorresponding
+      });
+      setPapers(prev => prev.map(p =>
+        p.paper_id === paper.paper_id
+          ? { ...p, contribution_percent: newContribution, is_first_author: isFirstAuthor, is_corresponding: isCorresponding, author_status: 'CONFIRMED' }
+          : p
+      ));
+    } catch (error) {
+      console.error('Confirm paper error:', error);
+    }
+  };
+
+  const handlePaperRejected = (paperId) => {
+    setPapers(prev => prev.filter(p => p.paper_id !== paperId));
+  };
+
+  if (!user?.id) {
     return (
-      <div className="scholar-list-layout">
-        
-        {/* คอลัมน์ซ้าย: แถบเมนูสาขาวิชา */}
-        <div className="dept-sidebar-new">
-          <ul className="dept-list-new">
-            {departments.map((dept, index) => (
-              <li
-                key={index}
-                onClick={() => changeDepartment(dept)}
-                className={`dept-item-new ${selectedDept === dept ? 'active' : ''}`}
-              >
-                {dept}
-                <span className="dept-count-new">
-                  ({users.filter(u => u.department === dept).length})
-                </span>
-              </li>
-            ))}
-          </ul>
-        </div>
-
-        {/* คอลัมน์ขวา: รายชื่ออาจารย์ (Grid Cards) */}
-        <div className="professor-grid-area-new">
-          <h2 className="professor-grid-title-new">
-            {selectedDept || 'กรุณาเลือกสาขาวิชา'}
-          </h2>
-
-          {!selectedDept ? (
-            <div className="empty-state-new">
-              <GraduationCap size={48} color="#94a3b8" />
-              <p>กรุณาเลือกสาขาวิชาด้านซ้ายเพื่อดูรายชื่ออาจารย์</p>
-            </div>
-          ) : professorsByDept.length === 0 ? (
-            <div className="empty-state-new">
-              <p>ไม่มีข้อมูลอาจารย์ในสาขานี้</p>
-            </div>
-          ) : (
-            <div className="professor-grid-new">
-              {professorsByDept.map((prof) => {
-                const parsed = parsePosition(prof.position);
-                return (
-                  <div
-                    key={prof.id}
-                    onClick={() => selectProfessor(prof.id)}
-                    className="professor-card-new"
-                  >
-                    <div>
-                      <h3 className="professor-name-new">
-                        {prof.name_th || prof.name_en}
-                      </h3>
-                      <div className="professor-meta-new">
-                        <p>ตำแหน่ง : {parsed.academicRank || prof.position || 'อาจารย์'}</p>
-                        <p className="email">Email : {prof.email}</p>
-                        {parsed.specialRoles.length > 0 && (
-                          <div className="role-badges-new">
-                            {parsed.specialRoles.map(role => (
-                              <span key={role} className="role-badge-gold">
-                                {role}
-                              </span>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                    {prof.scholar_id && (
-                      <div className="scholar-id-footer-new">
-                        <p className="scholar-id-text-new">
-                          <span className="scholar-id-label-new">Scholar ID:</span> {prof.scholar_id}
-                        </p>
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </div>
+      <div style={{ textAlign: 'center', padding: '60px 20px' }}>
+        <Loader2 size={48} color="#94a3b8" className="spin" />
+        <p style={{ marginTop: '16px', color: '#64748b' }}>กำลังโหลดข้อมูลผู้ใช้งาน...</p>
       </div>
     );
   }
 
   return (
     <div style={{ maxWidth: '1200px', margin: '0 auto', padding: '24px' }}>
-      
-      {/* 1. ส่วนหัว: ปุ่มย้อนกลับ, ชื่ออาจารย์ และ Scholar ID (Compact UI) */}
-      <div style={{ marginBottom: '32px' }}>
-        <button 
-          onClick={clearSelection} 
-          style={{ display: 'flex', alignItems: 'center', gap: '8px', background: 'transparent', border: 'none', color: '#64748b', cursor: 'pointer', marginBottom: '20px', fontSize: '14px', padding: 0 }}
-        >
-          <ChevronLeft size={16} /> ย้อนกลับไปหน้ารายชื่อ
-        </button>
-        <h4 style={{ margin: '0 0 8px 0', color: '#64748b', fontSize: '15px' }}>{selectedDept}</h4>
-        
-        <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '20px' }}>
-          <h2 style={{ margin: 0, color: '#4A148C', fontSize: '28px', fontWeight: 'bold' }}>
-            {currentUser?.name_th || currentUser?.name_en}
-          </h2>
 
-          {/* Compact Google Scholar ID Box */}
+      {/* 1. ส่วนหัว: ชื่อผู้ใช้และ Scholar ID */}
+      <div style={{ marginBottom: '32px' }}>
+        <h2 style={{ margin: '0 0 8px 0', color: '#4A148C', fontSize: '28px', fontWeight: 'bold' }}>
+          {user?.name_th || user?.name_en || user?.full_name}
+        </h2>
+
+        <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '20px' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', background: '#FCFAEE', border: '1px solid #F0EAC5', padding: '6px 12px', borderRadius: '20px', boxShadow: '0 1px 2px rgba(0,0,0,0.05)' }}>
             <GraduationCap size={16} color="#4A148C" />
             <span style={{ fontSize: '13px', fontWeight: 'bold', color: '#4A148C' }}>Scholar ID:</span>
 
             {isEditingScholarId ? (
               <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                <input 
-                  type="text" 
-                  value={scholarIdInput} 
+                <input
+                  type="text"
+                  value={scholarIdInput}
                   onChange={(e) => setScholarIdInput(e.target.value)}
                   placeholder="เช่น m8nS_k8AAAAJ"
                   style={{ padding: '2px 8px', fontSize: '13px', border: '1px solid #cbd5e1', borderRadius: '4px', width: '160px', outline: 'none' }}
                   autoFocus
                 />
-                <button 
-                  onClick={async () => {
-                    await saveScholarId();
-                    setIsEditingScholarId(false);
-                  }}
+                <button
+                  onClick={async () => { await saveScholarId(); setIsEditingScholarId(false); }}
                   disabled={isSavingScholarId}
                   style={{ background: '#10b981', color: 'white', border: 'none', padding: '4px 8px', borderRadius: '4px', cursor: 'pointer', display: 'flex', alignItems: 'center' }}
                   title="บันทึก"
                 >
                   {isSavingScholarId ? <RefreshCw size={14} className="spin" /> : <Save size={14} />}
                 </button>
-                <button 
-                  onClick={() => {
-                    setIsEditingScholarId(false);
-                    setScholarIdInput(currentUser?.scholar_id || ''); // คืนค่าเดิมถ้ากดยกเลิก
-                  }}
+                <button
+                  onClick={() => { setIsEditingScholarId(false); setScholarIdInput(user?.scholar_id || ''); }}
                   style={{ background: '#ef4444', color: 'white', border: 'none', padding: '4px 8px', borderRadius: '4px', cursor: 'pointer', display: 'flex', alignItems: 'center' }}
                   title="ยกเลิก"
                 >
@@ -397,24 +243,24 @@ export default function ScholarDashboard({ onImportToForm }) {
               </div>
             ) : (
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <span style={{ fontSize: '13px', color: currentUser?.scholar_id ? '#64748b' : '#94a3b8' }}>
-                  {currentUser?.scholar_id || 'ยังไม่ระบุ'}
+                <span style={{ fontSize: '13px', color: user?.scholar_id ? '#64748b' : '#94a3b8' }}>
+                  {user?.scholar_id || 'ยังไม่ระบุ'}
                 </span>
-                <button 
+                <button
                   onClick={() => setIsEditingScholarId(true)}
                   style={{ background: 'transparent', border: 'none', color: '#B08D38', cursor: 'pointer', padding: '2px', display: 'flex', alignItems: 'center' }}
                   title="แก้ไข ID"
                 >
                   <Edit3 size={14} />
                 </button>
-                
-                {currentUser?.scholar_id && (
-                  <button 
+
+                {user?.scholar_id && (
+                  <button
                     onClick={triggerScholarSync}
                     disabled={isSyncing}
                     style={{ background: '#4A148C', color: 'white', border: 'none', padding: '4px 10px', borderRadius: '12px', cursor: isSyncing ? 'not-allowed' : 'pointer', fontSize: '12px', display: 'flex', alignItems: 'center', gap: '4px', marginLeft: '4px', opacity: isSyncing ? 0.7 : 1 }}
                   >
-                    <RefreshCw size={12} className={isSyncing ? "spin" : ""} /> 
+                    <RefreshCw size={12} className={isSyncing ? "spin" : ""} />
                     {isSyncing ? 'กำลังซิงก์...' : 'ซิงก์'}
                   </button>
                 )}
@@ -423,7 +269,6 @@ export default function ScholarDashboard({ onImportToForm }) {
           </div>
         </div>
 
-        {/* ข้อความแจ้งเตือน (สำเร็จ/ผิดพลาด) */}
         {scholarFeedback && (
           <p style={{ margin: '12px 0 0 0', fontSize: '13px', color: scholarFeedbackType === 'error' ? '#ef4444' : '#166534', fontWeight: '500' }}>
             {scholarFeedback}
@@ -455,11 +300,11 @@ export default function ScholarDashboard({ onImportToForm }) {
       <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', gap: '16px', marginBottom: '24px', paddingBottom: '16px', borderBottom: '1px solid #e2e8f0' }}>
         <div style={{ display: 'flex', alignItems: 'center', background: 'white', border: '1px solid #cbd5e1', borderRadius: '6px', padding: '8px 12px', minWidth: '300px', flex: '1' }}>
           <Search size={18} color="#94a3b8" />
-          <input 
-            type="text" 
-            value={searchQuery} 
+          <input
+            type="text"
+            value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="ค้นหาชื่อผลงาน, ผู้ร่วมวิจัย..." 
+            placeholder="ค้นหาชื่อผลงาน, ผู้ร่วมวิจัย..."
             style={{ border: 'none', outline: 'none', width: '100%', marginLeft: '8px', fontSize: '14px' }}
           />
         </div>
@@ -469,7 +314,7 @@ export default function ScholarDashboard({ onImportToForm }) {
             { id: 'PENDING', label: `รอยืนยัน (${pendingCount})` },
             { id: 'CONFIRMED', label: `ยืนยันแล้ว (${confirmedCount})` }
           ].map(tab => (
-            <button 
+            <button
               key={tab.id}
               onClick={() => setFilterStatus(tab.id)}
               style={{
@@ -492,16 +337,17 @@ export default function ScholarDashboard({ onImportToForm }) {
 
       {/* 4. รายการผลงาน (Papers List) */}
       {isLoadingPapers ? (
-        <div style={{ textAlign: 'center', padding: '40px', color: '#64748b' }}>
-          <p>กำลังโหลดรายการผลงานวิชาการ...</p>
+        <div style={{ textAlign: 'center', padding: '60px 20px', color: '#64748b' }}>
+          <Loader2 size={48} color="#4A148C" className="spin" />
+          <p style={{ marginTop: '16px', fontSize: '16px' }}>กำลังโหลดข้อมูลผลงานของคุณ...</p>
         </div>
       ) : filteredPapers.length > 0 ? (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
           {filteredPapers.map(paper => (
-            <PaperCard 
+            <PaperCard
               key={paper.paper_id}
               paper={paper}
-              currentUser={currentUser}
+              currentUser={user}
               onConfirm={handleConfirmPaper}
               onReject={handlePaperRejected}
               onImport={handleImportToForm}
